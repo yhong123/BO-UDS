@@ -25,7 +25,7 @@ from sklearn.preprocessing import power_transform
 from hebo.design_space.design_space import DesignSpace
 from hebo.models.model_factory import get_model
 from hebo.acquisitions.acq import MACE, Mean, Sigma, LCB, PI, EI
-from hebo.acquisitions.eps import EPS
+from hebo.acquisitions.eps import UDS
 from hebo.acquisitions.eps_mace import EPS_MACE
 from hebo.acquisitions.est_mes import EST, MES
 from hebo.acq_optimizers.evolution_optimizer import EvolutionOpt
@@ -57,7 +57,7 @@ class HeboOptimizer(AbstractOptimizer):
     support_combinatorial = True
     support_contextual    = True
     def __init__(self, api_config, model_name = 'gpy', rand_sample = None, acq_cls = None, es = 'nsga2', 
-                 acq_type = 'mace', eps_th_type = 'q50', folder=''):
+                 acq_type = 'uds',  folder=''):
         """
         model_name : surrogate model to be used
         rand_iter  : iterations to perform random sampling
@@ -83,28 +83,26 @@ class HeboOptimizer(AbstractOptimizer):
         self.acq_type     = acq_type
         if (self.acq_type == 'mace'):
             self.acq_cls = MACE
-            print(" HEBO MACE")
-        elif (self.acq_type == 'eps-lcb'):
-            self.acq_cls = EPS
-            print("\n HEBO EPS-lcb")
+            
+        elif (self.acq_type == 'uds'):
+            self.acq_cls = UDS
             
         elif (self.acq_type == 'pi'):
             self.acq_cls = PI
-            print(" HEBO PI")
+            
         elif (self.acq_type == 'ei'):
             self.acq_cls = EI
-            print(" HEBO EI")
+            
         elif (self.acq_type == 'lcb'):
             self.acq_cls = LCB
-            print(" HEBO LCB")
+            
         elif (self.acq_type == 'est'):
             self.acq_cls = EST
-            print(" HEBO EST")
+            
         elif (self.acq_type == 'mes'):
             self.acq_cls = MES
-            print(" HEBO MES")
+            
         
-        self.eps_th_type = eps_th_type
         self.result_folder = folder
         
 
@@ -244,8 +242,6 @@ class HeboOptimizer(AbstractOptimizer):
         else:
             X, Xe = self.space.transform(self.X)
             
-            #if (self.acq_cls != EPS):
-                #if (self.acq_cls == MACE):
             try:
                 if self.y.min() <= 0:
                     y = torch.FloatTensor(power_transform(self.y / self.y.std(), method = 'yeo-johnson'))
@@ -255,13 +251,13 @@ class HeboOptimizer(AbstractOptimizer):
                         y = torch.FloatTensor(power_transform(self.y / self.y.std(), method = 'yeo-johnson'))
                 if y.std() < 0.5:
                     raise RuntimeError('Power transformation failed')
-                if (self.acq_cls != EPS):
+                if (self.acq_cls != UDS):
                     model = get_model(self.model_name, self.space.num_numeric, self.space.num_categorical, 1, **self.model_config)
                     model.fit(X, Xe, y)
             except:
                 print('*** Power transformation failed')
                 y     = torch.FloatTensor(self.y).clone()
-                if (self.acq_cls != EPS):
+                if (self.acq_cls != UDS):
                     model = get_model(self.model_name, self.space.num_numeric, self.space.num_categorical, 1, **self.model_config)
                     model.fit(X, Xe, y)
                 
@@ -270,7 +266,7 @@ class HeboOptimizer(AbstractOptimizer):
             best_x  = self.X.iloc[[best_id]]
             
             
-            if (self.acq_cls != EPS):
+            if (self.acq_cls != UDS):
                 py_best, ps2_best = model.predict(*self.space.transform(best_x))
                 py_best = py_best.detach().numpy().squeeze()
                 ps_best = ps2_best.sqrt().detach().numpy().squeeze()
@@ -284,7 +280,7 @@ class HeboOptimizer(AbstractOptimizer):
             #----------------------------------------
             
             if (self.acq_cls == MACE):
-                acq = self.acq_cls(model, py_best, kappa = kappa) # LCB < py_best
+                acq = self.acq_cls(model, py_best, kappa = kappa) 
                 assert acq.num_obj > 1
             
             elif (self.acq_cls == PI):
@@ -304,9 +300,9 @@ class HeboOptimizer(AbstractOptimizer):
             
             
             # partition rw & av & apply y transformation for each GP
-            elif (self.acq_cls == EPS): # and (False):
+            elif (self.acq_cls == UDS): # and (False):
                 
-                 if y.std() < 0.5:
+                if y.std() < 0.5:
                     print('Power transformation failed')
                     y1 = torch.FloatTensor(self.y).clone()
                     y1_norm = y1 - y1.mean()
@@ -320,11 +316,9 @@ class HeboOptimizer(AbstractOptimizer):
                 
                 ls_y = np.ravel(y1_norm)
                 
-                epsilon = statistics.median(ls_y)
                 
                 
-                
-                if (self.eps_th_type == 'range'):
+                if (True):
                     
                     y_median = sum(ls_y) / len(ls_y)
                     print("\ny_mean: ", y_median)
@@ -381,12 +375,12 @@ class HeboOptimizer(AbstractOptimizer):
                             ls_av_temp.insert(0, ls_med[i])
                     
                     
-                    rw_add_max = len(ls_av_temp) #- 1 #int(len(ls_av_temp) / 2) #min(3, int(len(ls_av_temp) / 2))
+                    rw_add_max = len(ls_av_temp) 
                     num_rw_added = 0
                     ls_av_addto_rw = []
                     ls_av_addto_rw_idx = []
                     
-                    av_add_max = len(ls_rw_temp) #- 1 #int(len(ls_rw_temp) / 2) #min(3, int(len(ls_rw_temp) / 2))
+                    av_add_max = len(ls_rw_temp) 
                     num_av_added = 0
                     ls_rw_addto_av = []
                     ls_rw_addto_av_idx = []
@@ -405,137 +399,77 @@ class HeboOptimizer(AbstractOptimizer):
                     middle = 0  #int(len(ls_av_idx)/2)
                     ls_av_min = min(ls_av)
                     ls_av_max = max(ls_av)
-                    av_gap = ls_av_max - ls_av_min
                     av_len = len(ls_av_idx)
                     if (ls_av_max < 0.5):
                         ls_av_avg1 = statistics.median(ls_av)
                         ls_av_avg2 = statistics.median(ls_av)
                         ls_av_avg3 = statistics.median(ls_av)
-                        #ls_av_avg1 = ls_av_min + (av_gap * 0.5)
-                        #ls_av_avg2 = ls_av_min + (av_gap * 0.5)
-                        middle1 = max(0, int(av_len*0.5) -1)
-                        middle2 = max(0, int(av_len*0.5) -1)
+                        
                     else:
-                        #ls_av_avg1 = ls_av_max * 0.25
-                        #ls_av_avg2 = ls_av_max * 0.75
                         ls_av_avg1 = np.quantile(ls_av, 0.25)
                         ls_av_avg2 = np.quantile(ls_av, 0.75)
                         ls_av_avg3 = statistics.median(ls_av)
-                        #ls_av_avg1 = ls_av_min + (av_gap * 0.25)
-                        #ls_av_avg2 = ls_av_min + (av_gap * 0.75)
-                        middle1 = max(0, int(av_len*0.25) -1)
-                        if (av_len > 1):
-                            middle2 = -2 
-                        else:
-                            middle2 = max(0, int(av_len*0.9) -1)
-                        
-                        
                     
                     for i in range(len(ls_av)-1, -1, -1):
                         if (ls_av[i] <= ls_av_avg1):
                             middle = i
                             break
-                    
-                    
-                    middle = middle1 #max(0, int(len(ls_av_idx)*0.5) -1)
-                    if (middle1 != middle2):
-                        if (not (ls_av_idx[middle] in ls_rw_idx)) and (not (ls_av_idx[middle] in ls_av_addto_rw_idx)): 
-                            ls_av_addto_rw_idx.append(ls_av_idx[middle])
-                            ls_av_addto_rw.append(ls_av[middle])
-                            ls_rw_temp.append(ls_av[middle])
-                            num_rw_added += 1
-                        
-                    print("ls_av_avg1: ", ls_av_avg1, ", idx: ", middle)
-                    
-                    
-                    middle = -1  #int(len(ls_av_idx)/2)
-                    for i in range(len(ls_av)):
-                        if (ls_av[i] >= ls_av_avg2):
-                            middle = i
-                            break
-                    
-                    
-                    middle = middle2 #max(0, int(len(ls_av_idx)*0.5) -1)
                     if (not (ls_av_idx[middle] in ls_rw_idx)) and (not (ls_av_idx[middle] in ls_av_addto_rw_idx)): 
                         ls_av_addto_rw_idx.append(ls_av_idx[middle])
                         ls_av_addto_rw.append(ls_av[middle])
                         ls_rw_temp.append(ls_av[middle])
                         num_rw_added += 1
                     
-                    print("ls_av_avg2: ", ls_av_avg2, ", idx: ", middle)
-                    print("add middle - num_rw_added: ", num_rw_added, ", num_av_added: ", num_av_added)
+                    
+                    middle = -1  
+                    for i in range(len(ls_av)):
+                        if (ls_av[i] >= ls_av_avg2):
+                            middle = i
+                            break
+                    if (not (ls_av_idx[middle] in ls_rw_idx)) and (not (ls_av_idx[middle] in ls_av_addto_rw_idx)): 
+                        ls_av_addto_rw_idx.append(ls_av_idx[middle])
+                        ls_av_addto_rw.append(ls_av[middle])
+                        ls_rw_temp.append(ls_av[middle])
+                        num_rw_added += 1
                     
                     
                     ### augment av
                     
-                    #middle = max(0, int(len(ls_rw_idx)/2) - 1)
                     middle = 0 #int(len(ls_rw_idx)/2)
                     ls_rw_min = min(ls_rw)
                     ls_rw_max = max(ls_rw)
-                    rw_gap = ls_rw_max - ls_rw_min
                     rw_len = len(ls_rw_idx)
                     if (ls_rw_min > -0.5):
                         ls_rw_avg1 = statistics.median(ls_rw)
                         ls_rw_avg2 = statistics.median(ls_rw)
                         ls_rw_avg3 = statistics.median(ls_rw)
-                        #ls_rw_avg1 = ls_rw_min + (rw_gap * 0.5)
-                        #ls_rw_avg2 = ls_rw_min + (rw_gap * 0.5)
-                        middle1 = max(0, int(rw_len*0.5) )
-                        middle2 = max(0, int(rw_len*0.5) )
+                        
                     else:
-                        #ls_rw_avg1 = ls_rw_min * 0.75
-                        #ls_rw_avg2 = ls_rw_min * 0.25
                         ls_rw_avg1 = np.quantile(ls_rw, 0.25)
                         ls_rw_avg2 = np.quantile(ls_rw, 0.75)
                         ls_rw_avg3 = statistics.median(ls_rw)
-                        #ls_rw_avg1 = ls_rw_min + (rw_gap * 0.25)
-                        #ls_rw_avg2 = ls_rw_min + (rw_gap * 0.75)
-                        if (rw_len > 1):
-                            middle1 = 1 
-                        else:
-                            middle1 = max(0, int(rw_len*0.25) )
-                        middle2 = max(0, int(rw_len*0.75) )
-                        #middle1 = max(0, int(rw_len*0.25) )
-                        #if (rw_len > 1):
-                        #    middle2 = -2
-                        #else:
-                        #    middle2 = -1 #max(0, int(rw_len*0.75) )
-                    
-                    
+                        
                     
                     for i in range(len(ls_rw)-1, -1, -1):
                         if (ls_rw[i] <= ls_rw_avg1):
                             middle = i
                             break
-                    
-                    
-                    middle = middle1 #max(0, int(len(ls_rw_idx)*0.5) )
                     if  (not (ls_rw_idx[middle] in ls_av_idx)) and (not (ls_rw_idx[middle] in ls_rw_addto_av_idx)): 
                         ls_rw_addto_av_idx.append(ls_rw_idx[middle])
                         ls_rw_addto_av.append(ls_rw[middle])
                         ls_av_temp.insert(0, ls_rw[middle])
                         num_av_added += 1
                      
-                    print("ls_rw_avg1: ", ls_rw_avg1, ", idx: ", middle)
-                    
-                    
-                    middle = -1 #int(len(ls_rw_idx)/2)
+                    middle = -1 
                     for i in range(len(ls_rw)):
                         if (ls_rw[i] >= ls_rw_avg2):
                             middle = i
                             break
-                    
-                    
-                    middle = middle2 #max(0, int(len(ls_rw_idx)*0.5) )
-                    if (middle1 != middle2):
-                        if  (not (ls_rw_idx[middle] in ls_av_idx)) and (not (ls_rw_idx[middle] in ls_rw_addto_av_idx)): 
-                            ls_rw_addto_av_idx.append(ls_rw_idx[middle])
-                            ls_rw_addto_av.append(ls_rw[middle])
-                            ls_av_temp.insert(0, ls_rw[middle])
-                            num_av_added += 1
-                    
-                    print("ls_rw_avg2: ", ls_rw_avg2, ", idx: ", middle)
-                    print("add middle - num_rw_added: ", num_rw_added, ", num_av_added: ", num_av_added)
+                    if  (not (ls_rw_idx[middle] in ls_av_idx)) and (not (ls_rw_idx[middle] in ls_rw_addto_av_idx)): 
+                        ls_rw_addto_av_idx.append(ls_rw_idx[middle])
+                        ls_rw_addto_av.append(ls_rw[middle])
+                        ls_av_temp.insert(0, ls_rw[middle])
+                        num_av_added += 1
                     
                     
                     
@@ -545,7 +479,6 @@ class HeboOptimizer(AbstractOptimizer):
                     total_len = len(ls_rw) + len(ls_av_addto_rw)
                     if  (total_len < min_len): 
                         for i in range(len(ls_av_idx)):
-                        #for i in range(len(ls_av_idx)-1, -1, -1):
                             if (not (ls_av_idx[i] in ls_rw_idx)) and (not (ls_av_idx[i] in ls_av_addto_rw_idx)): 
                                 ls_av_addto_rw_idx.append(ls_av_idx[i])
                                 ls_av_addto_rw.append(ls_av[i])
@@ -558,7 +491,6 @@ class HeboOptimizer(AbstractOptimizer):
                     total_len = len(ls_av) + len(ls_rw_addto_av)
                     if   (total_len < min_len):
                         for i in range(len(ls_rw_idx)-1, -1, -1):
-                        #for i in range(len(ls_rw_idx)):
                             if  (not (ls_rw_idx[i] in ls_av_idx)) and (not (ls_rw_idx[i] in ls_rw_addto_av_idx)): 
                                 ls_rw_addto_av_idx.append(ls_rw_idx[i])
                                 ls_rw_addto_av.append(ls_rw[i])
@@ -568,21 +500,14 @@ class HeboOptimizer(AbstractOptimizer):
                                 if  (total_len >= min_len):
                                     break
                     
-                    print("check len - num_rw_added: ", num_rw_added, ", num_av_added: ", num_av_added)
-                    
                     
                     # check variance
-                    var_th = 0.5
-                    var_th_max = 1.1
+                    var_th = 0.2
                     rw_var = np.std(ls_rw_temp, ddof=1)
                     av_var = np.std(ls_av_temp, ddof=1)
                     rw_av_var_max = max(rw_var, av_var)
-                    var_th = rw_av_var_max * 0.25
-                    print("rw_var: ", rw_var, ", av_var: ", av_var, ", var_th: ", var_th )
-                    if (var_th < 0.2):
-                        var_th = 0.2
-                    var_th = 0.2
-                    if (rw_var < var_th): # or (rw_var > var_th_max):
+                    
+                    if (rw_var < var_th): 
                         if (num_rw_added < rw_add_max):
                             for i in range(len(ls_av_idx)):
                                 if (not (ls_av_idx[i] in ls_rw_idx)) and (not (ls_av_idx[i] in ls_av_addto_rw_idx)): 
@@ -590,14 +515,11 @@ class HeboOptimizer(AbstractOptimizer):
                                     ls_av_addto_rw.append(ls_av[i])
                                     ls_rw_temp.append(ls_av[i])
                                     num_rw_added += 1
-                                    #rw_var = np.var(ls_rw_temp, ddof=1)
                                     rw_var = np.std(ls_rw_temp, ddof=1)
-                                    #if (rw_var >= var_th): # and (rw_var <= var_th_max):
                                     if (rw_var >= var_th) or (num_rw_added >= rw_add_max): 
                                         break
-                    print("rw_var: ", rw_var)
                     
-                    if (av_var < var_th): # or (av_var > var_th_max):
+                    if (av_var < var_th): 
                         if (num_av_added < av_add_max):
                             for i in range(len(ls_rw_idx)-1, -1, -1):
                                 if  (not (ls_rw_idx[i] in ls_av_idx)) and (not (ls_rw_idx[i] in ls_rw_addto_av_idx)): 
@@ -605,15 +527,9 @@ class HeboOptimizer(AbstractOptimizer):
                                     ls_rw_addto_av.append(ls_rw[i])
                                     ls_av_temp.insert(0, ls_rw[i])
                                     num_av_added += 1
-                                    #av_var = np.var(ls_av_temp, ddof=1)
                                     av_var = np.std(ls_av_temp, ddof=1)
-                                    #if (av_var >= var_th): # and (av_var <= var_th_max):
                                     if (av_var >= var_th) or (num_av_added >= av_add_max):
                                         break
-                    print("av_var: ", av_var)    
-                    print("check std < 0.3 - num_rw_added: ", num_rw_added, ", num_av_added: ", num_av_added)
-                    
-                    
                     
                     
                     for i in range(len(ls_av_addto_rw_idx)):
@@ -621,37 +537,22 @@ class HeboOptimizer(AbstractOptimizer):
                     for i in range(len(ls_rw_addto_av_idx)):
                         ls_av_idx.insert(0, ls_rw_addto_av_idx[i])   
                      
-                    
-                    
+                     
                     idx_rw = ls_rw_idx
                     idx_av = ls_av_idx
                     
-                    
-                
-                
-                    
-                
+               
                 y_rw = y1_norm[idx_rw]
                 X_rw = X[idx_rw]
                 Xe_rw = Xe[idx_rw]
-                #y_rw = y1_norm[idx_rw]
                 rw_best_y  = y_rw.min()
                 
                 
                 y_av = y1_norm[idx_av]
                 X_av = X[idx_av]
                 Xe_av = Xe[idx_av]
-                #y_av = y1_norm[idx_av]
                 av_best_y  = y_av.min()
                 av_best_y = av_best_y.detach().numpy().squeeze()
-                
-                
-                print("y_rw: ", y_rw)
-                print("y_av: ", y_av)
-                print("y len: ", len(ls_y), ", y_rw len: ", len(y_rw), ", y_av len: ", len(y_av))
-                print("y1 std: ", y1.std(), ", y1_norm std: ", y1_norm.std(), ", y_rw std: ", y_rw.std(), ", y_av std: ", y_av.std())
-                print("y1 var: ", y1.var(), ", y1_norm var: ", y1_norm.var(), ", y_rw var: ", y_rw.var(), ", y_av var: ", y_av.var())
-                
                 
                 
                 y_rw_t     = torch.FloatTensor(y_rw).clone()
@@ -671,8 +572,7 @@ class HeboOptimizer(AbstractOptimizer):
                 av_py_worst = av_py_worst.detach().numpy().squeeze()
                 
                 
-                acq = self.acq_cls(model_rw, model_rw, model_av, self.space, epsilon, eps_type=self.acq_type, folder=self.result_folder, 
-                                   kappa=kappa, rw_py_best=rw_py_best,  av_py_worst=av_py_worst)
+                acq = self.acq_cls(model_rw, model_rw, model_av,  eps_type=self.acq_type, folder=self.result_folder)
                 
                 
            
@@ -682,16 +582,11 @@ class HeboOptimizer(AbstractOptimizer):
             #mu  = Mean(model)
             #sig = Sigma(model, linear_a = -1.)
             opt = EvolutionOpt(self.space, acq, pop = 100, iters = 10, verbose = False, es=self.es)
-            '''
-            if (self.acq_cls == MACE):
-                opt = EvolutionOpt(self.space, acq, pop = 100, iters = 100, verbose = False, es=self.es)
-            else:
-                opt = EvolutionOpt(self.space, acq, pop = 100, iters = 1, verbose = False, es=self.es)
-            '''
+            #opt = EvolutionOpt(self.space, acq, pop = 100, iters = 100, verbose = False, es=self.es)
+            
             rec = opt.optimize(initial_suggest = best_x, fix_input = fix_input).drop_duplicates()
             rec = rec[self.check_unique(rec)]
-            #print("rec.shape[0]: ", rec.shape[0], ", n_suggestions: ", n_suggestions)
-
+            
             cnt = 0
             while rec.shape[0] < n_suggestions:
                 rand_rec = self.quasi_sample(n_suggestions - rec.shape[0], fix_input)
