@@ -29,7 +29,7 @@ from scipy.stats import norm
 
 
 
-class EPS(SingleObjectiveAcq):
+class UDS(SingleObjectiveAcq):
     def __init__(self, model : BaseModel, model_rw : BaseModel, model_av : BaseModel, space, 
                  eps_type='uds', 
                  folder='results', **conf):
